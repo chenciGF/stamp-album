@@ -5,15 +5,15 @@ const props = defineProps({
 });
 const emit = defineEmits(["select"]);
 
-// 仅用于左上角彩色点：1~7 彩虹色（你数据没给也没关系，用 id fallback）
+// 主题色：提供 hex + rgb（rgb 用来做透明色影，避免 color-mix 兼容问题）
 const RAINBOW = {
-  1: "#ef4444",
-  2: "#f97316",
-  3: "#eab308",
-  4: "#22c55e",
-  5: "#06b6d4",
-  6: "#3b82f6",
-  7: "#a855f7",
+  1: { hex: "#ef4444", rgb: "239, 68, 68" },   // 赤
+  2: { hex: "#f97316", rgb: "249, 115, 22" }, // 橙
+  3: { hex: "#eab308", rgb: "234, 179, 8" },  // 黄
+  4: { hex: "#22c55e", rgb: "34, 197, 94" },  // 绿
+  5: { hex: "#06b6d4", rgb: "6, 182, 212" },  // 青
+  6: { hex: "#3b82f6", rgb: "59, 130, 246" }, // 蓝
+  7: { hex: "#a855f7", rgb: "168, 85, 247" }, // 紫
 };
 
 function getColorIndex(stamp) {
@@ -24,7 +24,7 @@ function getColorIndex(stamp) {
   return ((id - 1) % 7) + 1;
 }
 
-function hexOf(i) {
+function colorOf(i) {
   return RAINBOW[i] ?? RAINBOW[1];
 }
 </script>
@@ -37,10 +37,13 @@ function hexOf(i) {
       class="stamp-card"
       @click="emit('select', stamp)"
     >
-      <!-- 卡牌本体 -->
+      <!-- 卡牌本体：主题色用“细外框+色影”表达 -->
       <div
         class="stamp-inner"
-        :style="{ '--edge': hexOf(getColorIndex(stamp)) }"
+        :style="{
+          '--edge': colorOf(getColorIndex(stamp)).hex,
+          '--edge-rgb': colorOf(getColorIndex(stamp)).rgb,
+        }"
       >
         <img
           v-if="stamp.imageUrl"
@@ -51,19 +54,14 @@ function hexOf(i) {
         />
         <div v-else class="missing-placeholder">?</div>
 
-        <!-- 轻微色调贴膜（不属于“框”，保留） -->
+        <!-- 轻微色调贴膜：保留（不新增任何框） -->
         <div class="tone"></div>
 
-        <!-- ✅ 只保留左上角：白框 + 彩色圆点 -->
-        <div class="corner" aria-hidden="true">
-          <span class="dot"></span>
-        </div>
-
-        <!-- ✅ 锁：保留 -->
+        <!-- 锁：保留 -->
         <div v-if="stamp.isCollected === false" class="lock">🔒</div>
       </div>
 
-      <!-- ✅ 标题移到卡牌下面：居中、不重叠 -->
+      <!-- 标题：在卡牌下方，居中，不重叠 -->
       <div class="stamp-title" :title="stamp.title">
         {{ stamp.title }}
       </div>
@@ -81,7 +79,7 @@ function hexOf(i) {
   align-content: start;
 }
 
-/* ✅ 卡片整体：竖向排版（卡 + 标题） */
+/* 卡片整体：竖向排版（卡 + 标题） */
 .stamp-card{
   user-select: none;
   cursor: pointer;
@@ -91,18 +89,37 @@ function hexOf(i) {
   align-items: center;
 }
 
-/* 卡牌本体：由 App 传入 --card-w/--card-h，确保 5:7 像素级 */
+/* ✅ 主题色表达核心：细外框 + 色影（替代左上角点点） */
 .stamp-inner{
   width: var(--card-w);
   height: var(--card-h);
   position: relative;
   border-radius: 14px;
   overflow: hidden;
-  background: rgba(255, 251, 235, 0.85);
-  border: 1px solid rgba(0,0,0,0.10);
-  box-shadow: 0 10px 26px rgba(0,0,0,0.10);
-}
+  background: rgba(255, 251, 235, 0.88);
 
+  /* 中性底边框（像纸/卡套边） */
+  border: 1px solid rgba(0,0,0,0.10);
+
+  /*
+    主题色：不做粗框，只做：
+    - inset 细色线（看得见但不抢）
+    - 外发光（很淡，像“色影”）
+    - 正常投影（层次）
+  */
+  box-shadow:
+    0 0 18px rgba(var(--edge-rgb), 0.16),
+    0 10px 26px rgba(0,0,0,0.10);
+}
+.stamp-inner::after{
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  border: 4px solid rgba(var(--edge-rgb), 0.59); /* ✅ 你想更粗就改这里的 4 */
+  pointer-events: none;
+  z-index: 10; /* ✅ 永远压在图片/遮罩之上 */
+}
 .stamp-img{
   width: 100%;
   height: 100%;
@@ -131,36 +148,15 @@ function hexOf(i) {
   inset: 0;
   background:
     radial-gradient(120% 90% at 20% 10%,
-      color-mix(in srgb, var(--edge) 20%, transparent),
+      rgba(var(--edge-rgb), 0.10),
       transparent 55%),
-    linear-gradient(180deg, rgba(0,0,0,0.04), rgba(0,0,0,0.14));
+    linear-gradient(180deg, rgba(0,0,0,0.03), rgba(0,0,0,0.12));
   mix-blend-mode: multiply;
   opacity: 0.35;
   pointer-events: none;
 }
 
-/* ✅ 左上角极简角标：白框 + 彩色点（无文字） */
-.corner{
-  position: absolute;
-  left: 8px;
-  top: 8px;
-  padding: 5px 7px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.85);
-  border: 1px solid rgba(0,0,0,0.10);
-  box-shadow: 0 8px 18px rgba(0,0,0,0.10);
-  pointer-events: none;
-}
-
-.dot{
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  display: block;
-  background: var(--edge);
-}
-
-/* ✅ 锁：保留 */
+/* 锁：保留 */
 .lock{
   position: absolute;
   inset: 0;
@@ -172,11 +168,11 @@ function hexOf(i) {
   background: rgba(0,0,0,0.20);
 }
 
-/* ✅ 标题在卡下方：居中、固定高度、防溢出、防重叠 */
+/* 标题在卡下方：居中、固定高度、防溢出、防重叠 */
 .stamp-title{
   margin-top: 8px;
   width: 100%;
-  height: 36px;              /* 固定高度：避免上下卡标题挤压 */
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
