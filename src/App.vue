@@ -1,6 +1,5 @@
-
 <script setup>
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { stampsData } from "./data/stamps";
 import StampGrid from "./components/StampGrid.vue";
 
@@ -15,11 +14,89 @@ const closeStamp = () => {
   selectedStamp.value = null;
 };
 
+// ===== 动态布局：根据页面实际尺寸决定 cols/rows -> stampsPerPage =====
+const pageMeasureEl = ref(null);
+
+// 你可以微调：最小卡宽（越小越能塞多）
+const MIN_CARD_W = 70;
+const MAX_COLS = 4;
+
+const layout = ref({
+  cols: 2,
+  rows: 2,
+  cardW: 100,
+  cardH: 140,
+  gap: 12,
+});
+
+// ✅ 每“单页”显示多少枚卡（动态决定）
+const stampsPerPage = ref(2);
+
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
+}
+
+/**
+ * 像素级 5:7：
+ * - cardW 强制为 5 的倍数 -> cardH = cardW/5*7 是整数像素
+ */
+function computeLayout(pageW, pageH) {
+  const gap = pageW < 380 ? 10 : 12;
+
+  let cols = Math.floor((pageW + gap) / (Math.max(MIN_CARD_W, 1) + gap));
+  cols = clamp(cols, 1, MAX_COLS);
+
+  let cardW = Math.floor((pageW - gap * (cols - 1)) / cols);
+  cardW = Math.max(cardW, MIN_CARD_W);
+  cardW = Math.floor(cardW / 5) * 5; // ✅ 像素比例关键
+  if (cardW < 50) cardW = 50;
+
+  const cardH = (cardW * 7) / 5;
+
+  let rows = Math.floor((pageH + gap) / (cardH + gap));
+  rows = clamp(rows, 1, pageW < 380 ? 3 : 4);
+
+  return { cols, rows, cardW, cardH, gap };
+}
+
+let ro;
+const refreshLayout = () => {
+  const el = pageMeasureEl.value;
+  if (!el) return;
+
+  const w = el.clientWidth;
+  const h = el.clientHeight;
+
+  const nextLayout = computeLayout(w, h);
+  layout.value = nextLayout;
+
+  const nextPerPage = nextLayout.cols * nextLayout.rows;
+  if (nextPerPage !== stampsPerPage.value) stampsPerPage.value = nextPerPage;
+};
+
+onMounted(() => {
+  refreshLayout();
+  ro = new ResizeObserver(() => refreshLayout());
+  if (pageMeasureEl.value) ro.observe(pageMeasureEl.value);
+  window.addEventListener("resize", refreshLayout, { passive: true });
+});
+
+onBeforeUnmount(() => {
+  ro?.disconnect?.();
+  window.removeEventListener("resize", refreshLayout);
+});
+
+const gridStyle = computed(() => ({
+  "--cols": layout.value.cols,
+  "--card-w": `${layout.value.cardW}px`,
+  "--card-h": `${layout.value.cardH}px`,
+  "--gap": `${layout.value.gap}px`,
+}));
+
 // ===== 分页/翻页 =====
-const stampsPerPage = ref(2);     // ✅ 每“单页”显示多少枚邮票（你想调就改这里）
-const spreadIndex = ref(0);        // ✅ 跨页索引（一次显示左右两页）
+const spreadIndex = ref(0);
 const isFlipping = ref(false);
-const direction = ref(null);       // 'next' | 'prev'
+const direction = ref(null); // 'next' | 'prev'
 
 const pages = computed(() => {
   const out = [];
@@ -47,7 +124,7 @@ const prev = computed(() => spreads.value[spreadIndex.value - 1] ?? null);
 const hasNext = computed(() => !!next.value);
 const hasPrev = computed(() => !!prev.value);
 
-// 数据变化（未来筛选）防止越界
+// 数据变化防止越界
 watch(
   spreads,
   () => {
@@ -99,7 +176,7 @@ const onFlipEnd = () => {
 
 // ===== 空白处：0.3s 双击翻页 + cooldown =====
 const DOUBLE_CLICK_MS = 300;
-const COOLDOWN_MS = 850; // 稍大于翻页动画，避免误触连翻
+const COOLDOWN_MS = 850;
 
 const lastBlankLeft = ref(0);
 const lastBlankRight = ref(0);
@@ -111,7 +188,6 @@ function isClickOnStamp(e) {
 }
 
 function onPageBlankClick(side, e) {
-  // 只处理“空白处”的点击：点在 stamp-card 上直接忽略
   if (isFlipping.value) return;
   if (isClickOnStamp(e)) return;
 
@@ -140,13 +216,11 @@ function onPageBlankClick(side, e) {
       return;
     }
     lastBlankRight.value = now;
-    return;
   }
 }
 
-// ===== 页码（右下角显示：第X页/共Y页；双页显示会显示范围）=====
+// ===== 页码 =====
 const totalPages = computed(() => pages.value.length);
-
 const pageLabel = computed(() => {
   const total = totalPages.value;
   if (!total) return "第 0 页 / 共 0 页";
@@ -154,107 +228,102 @@ const pageLabel = computed(() => {
   const leftNo = spreadIndex.value * 2 + 1;
   const rightNo = Math.min(leftNo + 1, total);
 
-  if (rightNo === leftNo) {
-    return `第 ${leftNo} 页 / 共 ${total} 页`;
-  }
+  if (rightNo === leftNo) return `第 ${leftNo} 页 / 共 ${total} 页`;
   return `第 ${leftNo}-${rightNo} 页 / 共 ${total} 页`;
 });
 </script>
 
 <template>
-  <div class="min-h-screen bg-gradient-to-b from-amber-100 to-amber-200 text-amber-950">
-    <div class="max-w-7xl mx-auto px-4 py-6">
+  <div class="min-h-screen app-bg">
+    <div class="max-w-7xl mx-auto px-4 py-6 text-slate-100">
       <div class="flex items-end justify-between gap-4 mb-4">
         <div>
           <h1 class="text-2xl md:text-3xl font-bold tracking-tight">Stamp Album</h1>
-          <p class="text-sm opacity-80 mt-1">点邮票看详情 · 空白处双击翻页</p>
+          <p class="text-sm opacity-80 mt-1">点卡看详情 · 空白处双击翻页</p>
+        </div>
+        <div class="text-xs opacity-70">
+          自动排版：{{ layout.cols }}×{{ layout.rows }} / 单页 {{ stampsPerPage }}
         </div>
       </div>
 
-      <!-- 书本容器 -->
       <div class="book-shell relative mx-auto">
-        <div
-          class="w-full h-[82vh] bg-amber-50 rounded-xl shadow-2xl overflow-hidden border-[8px] border-amber-900 relative"
-        >
-          <!-- 纸张纹理层（不挡点击） -->
-          <div
-            class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cream-paper.png')] opacity-40 pointer-events-none z-0"
-          ></div>
+        <div class="book-cover">
+          <div class="book-pages text-amber-950">
+            <div class="absolute inset-0 page-texture pointer-events-none z-0"></div>
 
-          <!-- underlay：翻页时底下露出来的 -->
-          <div class="absolute inset-0 grid grid-cols-2 z-10">
-            <div class="p-4 md:p-6">
-              <StampGrid :items="underLeft" @select="safeOpenStamp" />
-            </div>
-            <div class="p-4 md:p-6">
-              <StampGrid :items="underRight" @select="safeOpenStamp" />
-            </div>
-          </div>
-
-          <!-- 中线光晕/书脊（不挡点击） -->
-          <div class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-0 z-30 pointer-events-none">
-            <div class="absolute inset-y-0 -left-4 w-8 bg-gradient-to-r from-transparent via-black/10 to-transparent"></div>
-            <div class="absolute inset-y-0 left-0 w-[1px] bg-amber-900/20"></div>
-          </div>
-
-          <!-- current：不翻页时显示当前跨页 + 空白处双击检测 -->
-          <div v-if="!isFlipping" class="absolute inset-0 grid grid-cols-2 z-20">
-            <div class="p-4 md:p-6" @click="onPageBlankClick('left', $event)">
-              <StampGrid :items="current.left" @select="safeOpenStamp" />
-            </div>
-            <div class="p-4 md:p-6" @click="onPageBlankClick('right', $event)">
-              <StampGrid :items="current.right" @select="safeOpenStamp" />
-            </div>
-          </div>
-
-          <!-- turn-layer：翻页那张“纸”（不挡点击） -->
-          <div v-if="isFlipping" class="absolute inset-0 z-40 pointer-events-none">
-            <div class="sheet" :class="direction" @animationend="onFlipEnd">
-              <div class="face front">
-                <div class="p-4 md:p-6 h-full">
-                  <StampGrid :items="sheetFront" />
-                </div>
+            <!-- underlay -->
+            <div class="absolute inset-0 grid grid-cols-2 z-10">
+              <div ref="pageMeasureEl" class="p-4 md:p-6">
+                <StampGrid :items="underLeft" :gridStyle="gridStyle" @select="safeOpenStamp" />
               </div>
-
-              <div class="face back">
-                <div class="p-4 md:p-6 h-full">
-                  <StampGrid :items="sheetBack" />
-                </div>
+              <div class="p-4 md:p-6">
+                <StampGrid :items="underRight" :gridStyle="gridStyle" @select="safeOpenStamp" />
               </div>
-
-              <div class="shadow"></div>
             </div>
-          </div>
 
-          <!-- ✅ 左/右大箭头：中间偏左 / 中间偏右 -->
-          <button
-            class="nav-arrow nav-left"
-            :disabled="isFlipping || !hasPrev"
-            @click.stop="flipPrev"
-            aria-label="Previous page"
-            title="向前翻一页"
-          >
-            ❮
-          </button>
+            <!-- 书脊 -->
+            <div class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-0 z-30 pointer-events-none">
+              <div class="absolute inset-y-0 -left-4 w-8 bg-gradient-to-r from-transparent via-black/10 to-transparent"></div>
+              <div class="absolute inset-y-0 left-0 w-[1px] bg-black/10"></div>
+            </div>
 
-          <button
-            class="nav-arrow nav-right"
-            :disabled="isFlipping || !hasNext"
-            @click.stop="flipNext"
-            aria-label="Next page"
-            title="向后翻一页"
-          >
-            ❯
-          </button>
+            <!-- current -->
+            <div v-if="!isFlipping" class="absolute inset-0 grid grid-cols-2 z-20">
+              <div class="p-4 md:p-6" @click="onPageBlankClick('left', $event)">
+                <StampGrid :items="current.left" :gridStyle="gridStyle" @select="safeOpenStamp" />
+              </div>
+              <div class="p-4 md:p-6" @click="onPageBlankClick('right', $event)">
+                <StampGrid :items="current.right" :gridStyle="gridStyle" @select="safeOpenStamp" />
+              </div>
+            </div>
 
-          <!-- ✅ 右下角页码 -->
-          <div class="page-indicator">
-            {{ pageLabel }}
+            <!-- turn-layer -->
+            <div v-if="isFlipping" class="absolute inset-0 z-40 pointer-events-none">
+              <div class="sheet" :class="direction" @animationend="onFlipEnd">
+                <div class="face front">
+                  <div class="p-4 md:p-6 h-full">
+                    <StampGrid :items="sheetFront" :gridStyle="gridStyle" />
+                  </div>
+                </div>
+
+                <div class="face back">
+                  <div class="p-4 md:p-6 h-full">
+                    <StampGrid :items="sheetBack" :gridStyle="gridStyle" />
+                  </div>
+                </div>
+
+                <div class="shadow"></div>
+              </div>
+            </div>
+
+            <!-- arrows -->
+            <button
+              class="nav-arrow nav-left"
+              :disabled="isFlipping || !hasPrev"
+              @click.stop="flipPrev"
+              aria-label="Previous page"
+              title="向前翻一页"
+            >
+              ❮
+            </button>
+
+            <button
+              class="nav-arrow nav-right"
+              :disabled="isFlipping || !hasNext"
+              @click.stop="flipNext"
+              aria-label="Next page"
+              title="向后翻一页"
+            >
+              ❯
+            </button>
+
+            <!-- page label -->
+            <div class="page-indicator">{{ pageLabel }}</div>
           </div>
         </div>
       </div>
 
-      <!-- Modal：点击邮票弹窗（保留） -->
+      <!-- Modal -->
       <Transition name="modal">
         <div v-if="selectedStamp" class="modal-overlay" @click.self="closeStamp">
           <div class="modal-content">
@@ -295,13 +364,54 @@ const pageLabel = computed(() => {
 </template>
 
 <style>
-/* ===== 书本视角（让翻页更立体）===== */
+:root{
+  --cover: rgb(46,49,62);
+  --cover-hi: rgb(60,64,82);
+  --paper: #fffbeb;
+
+  /* ✅ 原来的“棕色边框感” */
+  --brown: #78350f;
+}
+
+.app-bg{
+  background:
+    radial-gradient(1200px 700px at 30% 0%, rgba(255,255,255,0.06), transparent 60%),
+    radial-gradient(900px 600px at 85% 25%, rgba(255,255,255,0.05), transparent 65%),
+    linear-gradient(180deg, var(--cover-hi), var(--cover));
+}
+
 .book-shell {
   width: min(1200px, 96vw);
   perspective: 1400px;
 }
 
-/* ===== 翻页动画（手撕版，无依赖）===== */
+.book-cover{
+  width: 100%;
+  height: 82vh;
+  background: var(--cover);
+  border-radius: 22px;
+  box-shadow: 0 28px 90px rgba(0,0,0,0.45);
+  padding: 10px;
+  position: relative;
+}
+
+/* ✅ 只改这一处：内页边框恢复棕色粗边 */
+.book-pages{
+  width: 100%;
+  height: 100%;
+  background: var(--paper);
+  border-radius: 18px;
+  overflow: hidden;
+  position: relative;
+  border: 8px solid var(--brown);
+}
+
+.page-texture{
+  background-image: url("https://www.transparenttextures.com/patterns/cream-paper.png");
+  opacity: 0.35;
+}
+
+/* ===== 翻页动画（保持你现有）===== */
 .sheet {
   position: absolute;
   top: 0;
@@ -309,52 +419,37 @@ const pageLabel = computed(() => {
   width: 50%;
   transform-style: preserve-3d;
 }
-
 .sheet.next {
   left: 50%;
   transform-origin: left center;
   animation: flip-next 520ms ease-in-out forwards;
 }
-
 .sheet.prev {
   left: 0%;
   transform-origin: right center;
   animation: flip-prev 520ms ease-in-out forwards;
 }
+
 .face {
   position: absolute;
   inset: 0;
   backface-visibility: hidden;
   border-radius: 18px;
   overflow: hidden;
-
-  /* ✅ 跟书本底色一致（Tailwind amber-50 ≈ #FFFBEB） */
-  background: #fffbeb;
-
-  /* 可选：略微加一点边界，让翻页更像“纸” */
-  border: 1px solid rgba(120, 53, 15, 0.10);
+  background: var(--paper);
+  border: 1px solid rgba(0, 0, 0, 0.06);
 }
-
-/* ✅ 给翻页“纸张”加同款纹理，但不影响内部内容透明度 */
 .face::before {
   content: "";
   position: absolute;
   inset: 0;
   background-image: url("https://www.transparenttextures.com/patterns/cream-paper.png");
-  opacity: 0.40;
+  opacity: 0.35;
   pointer-events: none;
   z-index: 0;
 }
-
-/* ✅ 保证内容在纹理之上 */
-.face > * {
-  position: relative;
-  z-index: 1;
-}
-
-.face.back {
-  transform: rotateY(180deg);
-}
+.face > * { position: relative; z-index: 1; }
+.face.back { transform: rotateY(180deg); }
 
 .shadow {
   position: absolute;
@@ -365,21 +460,11 @@ const pageLabel = computed(() => {
   animation: shadow-pulse 520ms ease-in-out forwards;
 }
 
-@keyframes flip-next {
-  from { transform: rotateY(0deg); }
-  to   { transform: rotateY(-180deg); }
-}
-@keyframes flip-prev {
-  from { transform: rotateY(0deg); }
-  to   { transform: rotateY(180deg); }
-}
-@keyframes shadow-pulse {
-  0%   { opacity: 0.05; }
-  50%  { opacity: 0.25; }
-  100% { opacity: 0.08; }
-}
+@keyframes flip-next { from { transform: rotateY(0deg); } to { transform: rotateY(-180deg); } }
+@keyframes flip-prev { from { transform: rotateY(0deg); } to { transform: rotateY(180deg); } }
+@keyframes shadow-pulse { 0% { opacity: 0.05; } 50% { opacity: 0.25; } 100% { opacity: 0.08; } }
 
-/* ===== 显眼箭头：中间偏左/偏右 ===== */
+/* arrows */
 .nav-arrow {
   position: absolute;
   top: 80%;
@@ -388,40 +473,24 @@ const pageLabel = computed(() => {
   height: 64px;
   border-radius: 9999px;
   background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(120, 53, 15, 0.25);
+  border: 1px solid rgba(0, 0, 0, 0.12);
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.18);
   display: grid;
   place-items: center;
   font-size: 34px;
   line-height: 1;
-  color: rgba(120, 53, 15, 0.92);
+  color: rgba(46, 49, 62, 0.95);
   z-index: 60;
   cursor: pointer;
   transition: transform 120ms ease, background 120ms ease, box-shadow 120ms ease;
   user-select: none;
 }
+.nav-left { left: calc(50% - 140px); }
+.nav-right { right: calc(50% - 140px); }
+.nav-arrow:hover:not(:disabled) { transform: translateY(-50%) scale(1.04); background: rgba(255, 255, 255, 0.95); }
+.nav-arrow:disabled { opacity: 0.35; cursor: not-allowed; }
 
-.nav-left {
-  left: calc(50% - 140px); /* ✅ 中间偏左 */
-}
-
-.nav-right {
-  right: calc(50% - 140px); /* ✅ 中间偏右 */
-}
-
-.nav-arrow:hover:not(:disabled) {
-  transform: translateY(-50%) scale(1.04);
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
-}
-
-.nav-arrow:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.10);
-}
-
-/* ===== 右下角页码 ===== */
+/* page label */
 .page-indicator {
   position: absolute;
   right: 14px;
@@ -429,59 +498,15 @@ const pageLabel = computed(() => {
   z-index: 55;
   padding: 6px 10px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.75);
-  border: 1px solid rgba(120, 53, 15, 0.18);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(0, 0, 0, 0.10);
   font-size: 13px;
-  color: rgba(120, 53, 15, 0.9);
+  color: rgba(46, 49, 62, 0.92);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.10);
   user-select: none;
 }
 
-/* ===== 邮票卡片样式（供 closest('.stamp-card') 判断）===== */
-.stamp-card {
-  cursor: pointer;
-  user-select: none;
-}
-
-.stamp-inner {
-  position: relative;
-  border-radius: 14px;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(120, 53, 15, 0.15);
-  aspect-ratio: 4 / 5;
-}
-
-.stamp-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  transform: scale(1);
-  transition: transform 200ms ease;
-}
-
-.stamp-card:hover .stamp-img {
-  transform: scale(1.03);
-}
-
-.missing-placeholder {
-  width: 100%;
-  height: 100%;
-  display: grid;
-  place-items: center;
-  font-size: 2rem;
-  color: rgba(120, 53, 15, 0.55);
-}
-
-.stamp-title {
-  margin-top: 6px;
-  font-size: 0.875rem;
-  line-height: 1.2;
-  opacity: 0.9;
-}
-
-/* ===== Modal（简洁版）===== */
+/* ===== Modal：只改字体颜色恢复黑色（不改布局）===== */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -496,10 +521,13 @@ const pageLabel = computed(() => {
   width: min(980px, 96vw);
   background: #fffaf0;
   border-radius: 18px;
-  border: 1px solid rgba(120, 53, 15, 0.22);
+  border: 1px solid rgba(0, 0, 0, 0.10);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
   position: relative;
   overflow: hidden;
+
+  /* ✅ 强制弹窗文字为黑色 */
+  color: #111827;
 }
 
 .modal-close {
@@ -509,7 +537,7 @@ const pageLabel = computed(() => {
   width: 36px;
   height: 36px;
   border-radius: 999px;
-  border: 1px solid rgba(120, 53, 15, 0.2);
+  border: 1px solid rgba(0, 0, 0, 0.10);
   background: rgba(255, 255, 255, 0.9);
   cursor: pointer;
 }
@@ -532,40 +560,19 @@ const pageLabel = computed(() => {
 .modal-img-wrap {
   border-radius: 16px;
   overflow: hidden;
-  border: 1px solid rgba(120, 53, 15, 0.15);
+  border: 1px solid rgba(0, 0, 0, 0.08);
   background: #fff;
   aspect-ratio: 4 / 3;
   display: grid;
   place-items: center;
 }
 
-.modal-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.modal-missing {
-  width: 100%;
-  height: 100%;
-  display: grid;
-  place-items: center;
-  font-size: 3rem;
-  color: rgba(120, 53, 15, 0.55);
-}
-
-.modal-desc {
-  font-size: 0.95rem;
-  line-height: 1.7;
-  opacity: 0.9;
-}
+.modal-img { width: 100%; height: 100%; object-fit: cover; }
+.modal-missing { width: 100%; height: 100%; display: grid; place-items: center; font-size: 3rem; color: rgba(46,49,62,0.55); }
+.modal-desc { font-size: 0.95rem; line-height: 1.7; opacity: 0.9; }
 
 .modal-enter-active,
-.modal-leave-active {
-  transition: opacity 160ms ease;
-}
+.modal-leave-active { transition: opacity 160ms ease; }
 .modal-enter-from,
-.modal-leave-to {
-  opacity: 0;
-}
+.modal-leave-to { opacity: 0; }
 </style>
