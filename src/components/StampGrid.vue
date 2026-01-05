@@ -72,10 +72,19 @@ function colorOf(i) {
 <style scoped>
 /* 网格：固定像素列宽，保持像素级 5:7 卡牌不被拉伸 */
 .stamp-grid{
+  width: 100%;
+  box-sizing: border-box;
+
   display: grid;
   grid-template-columns: repeat(var(--cols), var(--card-w));
   gap: var(--gap);
-  justify-content: center;
+
+  /* ✅ 新增：左右安全边距 */
+  padding-inline: var(--pad-x);
+
+  /* ✅ 新增：行内尽量均分空白（多列 space-between，单列 center） */
+  justify-content: var(--justify);
+
   align-content: start;
 }
 

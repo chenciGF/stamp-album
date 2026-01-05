@@ -15,29 +15,108 @@ const pageMeasureEl = ref(null);
 const MIN_CARD_W = 70;
 const MAX_COLS = 4;
 
-const layout = ref({ cols: 2, rows: 2, cardW: 100, cardH: 140, gap: 12 });
+const layout = ref({
+  cols: 2,
+  rows: 2,
+  cardW: 100,
+  cardH: 140,
+  gap: 12,
+  padX: 24,              // ✅ 新增：左右安全边距
+  justify: "space-between" // ✅ 新增：行内尽量均分
+});
+
 const stampsPerPage = ref(2);
 
 function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
 
+
+// 让 gap 落在偶数像素，视觉更稳
+function roundToEvenPx(x) {
+  return Math.round(x / 2) * 2;
+}
+
 function computeLayout(pageW, pageH) {
-  const gap = pageW < 380 ? 10 : 12;
+  // 你说更松弛：0.16 是你试过的
+  const GAP_RATIO = 0.16;
+  const GAP_MIN = 16;
+  const GAP_MAX = 32;
 
-  let cols = Math.floor((pageW + gap) / (Math.max(MIN_CARD_W, 1) + gap));
-  cols = clamp(cols, 1, MAX_COLS);
+  // 安全边距护栏（你之前觉得贴边，就把下限抬起来）
+  const PAD_MIN = pageW < 420 ? 18 : 24;
+  const PAD_MAX = pageW < 420 ? 32 : 56;
 
-  let cardW = Math.floor((pageW - gap * (cols - 1)) / cols);
-  cardW = Math.max(cardW, MIN_CARD_W);
-  cardW = Math.floor(cardW / 5) * 5;
-  if (cardW < 50) cardW = 50;
+  let cols = MAX_COLS;
+  let gap = 18;
+  let padX = PAD_MIN;
 
+  // 逐列尝试：如果当前 cols 放不下（考虑 padX/gap/MIN_CARD_W），就 cols--
+  while (cols > 1) {
+    // 先用 MIN_CARD_W 估一个“基准 gap”
+    const testGap = GAP_MIN;
+    const testPad = PAD_MIN;
+
+    const availW0 = pageW - testPad * 2;
+    const w0 = Math.floor((availW0 - testGap * (cols - 1)) / cols);
+    if (w0 < MIN_CARD_W) {
+      cols -= 1;
+      continue;
+    }
+
+    // 基于这个 cols，算一次 cardW（后续会按 5 的倍数收敛）
+    let cardW = Math.floor((availW0 - testGap * (cols - 1)) / cols);
+    cardW = Math.max(cardW, MIN_CARD_W);
+    cardW = Math.floor(cardW / 5) * 5;
+
+    // ✅ 松弛型 gap：跟随 cardW，带上下限，取偶数像素
+    gap = clamp(roundToEvenPx(cardW * GAP_RATIO), GAP_MIN, GAP_MAX);
+
+    // ✅ 安全边距：优先满足“至少 PAD_MIN”，并略大于 gap（像书页留白）
+    padX = clamp(roundToEvenPx(Math.max(PAD_MIN, gap * 1.25)), PAD_MIN, PAD_MAX);
+
+    // 用最终 padX/gap 再算一次是否仍能放下
+    const availW = pageW - padX * 2;
+    const w1 = Math.floor((availW - gap * (cols - 1)) / cols);
+
+    if (w1 < MIN_CARD_W) {
+      cols -= 1;
+      continue;
+    }
+
+    // 能放下：用 w1 作为 cardW 再做 5 的倍数收敛（只会更小，不会溢出）
+    cardW = Math.floor(w1 / 5) * 5;
+    if (cardW < 50) cardW = 50;
+
+    const cardH = (cardW * 7) / 5;
+
+    // 行数保持统一：row-gap 用同一个 gap
+    let rows = Math.floor((pageH + gap) / (cardH + gap));
+    rows = clamp(rows, 1, pageW < 380 ? 3 : 4);
+
+    return {
+      cols,
+      rows,
+      cardW,
+      cardH,
+      gap,
+      padX,
+      justify: cols === 1 ? "center" : "space-between",
+    };
+  }
+
+  // cols == 1 的兜底（手机/极窄情况）
+  padX = clamp(roundToEvenPx(PAD_MIN), PAD_MIN, PAD_MAX);
+  const availW = Math.max(50, pageW - padX * 2);
+  let cardW = Math.floor(availW / 5) * 5;
+  cardW = Math.max(cardW, 50);
   const cardH = (cardW * 7) / 5;
+  gap = clamp(roundToEvenPx(cardW * GAP_RATIO), GAP_MIN, GAP_MAX);
 
   let rows = Math.floor((pageH + gap) / (cardH + gap));
   rows = clamp(rows, 1, pageW < 380 ? 3 : 4);
 
-  return { cols, rows, cardW, cardH, gap };
+  return { cols: 1, rows, cardW, cardH, gap, padX, justify: "center" };
 }
+
 
 let ro;
 const refreshLayout = () => {
@@ -71,6 +150,8 @@ const gridStyle = computed(() => ({
   "--card-w": `${layout.value.cardW}px`,
   "--card-h": `${layout.value.cardH}px`,
   "--gap": `${layout.value.gap}px`,
+  "--pad-x": `${layout.value.padX}px`,   // ✅ 新增
+  "--justify": layout.value.justify,     // ✅ 新增
 }));
 
 // ===== 分页/翻页（保留）=====
