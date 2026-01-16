@@ -28,13 +28,24 @@
   function colorOf(i) {
     return RAINBOW[i] ?? RAINBOW[1];
   }
+  function hasDateLine(stamp) {
+  return props.showAcquiredDate && stamp?.isCollected && !!stamp?.acquiredDate;
+}
 
-  function formatDateYMD(dateStr) {
-    if (!dateStr) return "";
-    const [y, m, d] = String(dateStr).split("-");
-    if (!y || !m || !d) return String(dateStr);
-    return `${y}年${Number(m)}月${Number(d)}日`;
-  }
+
+  function formatDateShort(dateStr) {
+  if (!dateStr) return "";
+  // 允许 YYYY-MM-DD 或 ISO 字符串
+  const s = String(dateStr);
+  const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (!m) return s;
+
+  const yy = String(Number(m[1]) % 100).padStart(2, "0");
+  const mm = String(Number(m[2])).padStart(2, "0");
+  const dd = String(Number(m[3])).padStart(2, "0");
+  return `${yy}.${mm}.${dd}`;
+}
+
 </script>
 
 <template>
@@ -66,16 +77,19 @@
       </div>
 
       <!-- ✅ 固定占位：标题两行 + 日期一行（日期只做显隐，不塌高度） -->
-      <div class="stamp-meta">
-        <div class="stamp-title" :title="stamp.title">
-          {{ stamp.title }}
-        </div>
+      <div
+          class="stamp-meta"
+          :class="hasDateLine(stamp) ? 'meta--with-date' : 'meta--no-date'"
+        >
+          <div class="stamp-title" :title="stamp.title">
+            {{ stamp.title }}
+          </div>
 
-        <div class="stamp-date" :class="{ 'date-hidden': !props.showAcquiredDate }">
-          <span v-if="stamp.isCollected && stamp.acquiredDate">
-            获得：{{ formatDateYMD(stamp.acquiredDate) }}
-          </span>
-        </div>
+          <div v-if="hasDateLine(stamp)" class="stamp-date">
+            {{ formatDateShort(stamp.acquiredDate) }}
+          </div>
+        
+
       </div>
     </div>
   </div>
@@ -188,21 +202,21 @@
   box-shadow: 0 10px 22px rgba(0,0,0,0.08);
   box-sizing: border-box;
 
-  display: grid;
-  grid-template-rows: calc(var(--meta-line-h, 14px) * 2) var(--meta-line-h, 14px);
-  row-gap: 2px;
+  display: flex;
+  flex-direction: column;
 }
 
+.meta--with-date{ justify-content: space-between; }
+.meta--no-date{ justify-content: center; }
 .stamp-title{
   font-size: calc(var(--meta-line-h, 14px) - 1px);
   font-weight: 800;
   line-height: var(--meta-line-h, 14px);
-  color: rgba(46,49,62,0.92);
   text-align: center;
 
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  line-clamp: 2;         /* 标准属性：用于兼容/消警告 */
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
