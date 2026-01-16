@@ -4,7 +4,29 @@
   import StampGrid from "./components/StampGrid.vue";
   
   const stamps = ref(stampsData);
-  
+    // ===== 设置（右上角齿轮）=====
+  // ✅ 仅控制“显隐”，不参与重排（占位高度固定，避免翻页乱序）
+  const showAcquiredDate = ref(true);
+  const settingsOpen = ref(false);
+  const settingsEl = ref(null);
+
+  const toggleSettings = () => { settingsOpen.value = !settingsOpen.value; };
+  const closeSettings = () => { settingsOpen.value = false; };
+
+  function formatDateYMD(dateStr) {
+    if (!dateStr) return "";
+    const [y, m, d] = String(dateStr).split("-");
+    if (!y || !m || !d) return String(dateStr);
+    return `${y}年${Number(m)}月${Number(d)}日`;
+  }
+
+  function onDocPointerDown(e) {
+    if (!settingsOpen.value) return;
+    const root = settingsEl.value;
+    if (!root) return;
+    if (root.contains(e.target)) return;
+    closeSettings();
+  }
   // ===== 弹窗逻辑（保留）=====
   const selectedStamp = ref(null);
   const openStamp = (stamp) => { selectedStamp.value = stamp; };
@@ -21,6 +43,9 @@
     cardW: 100,
     cardH: 140,
     gap: 12,
+    metaLineH: 14,
+    metaGap: 8,
+    metaH: 58,
     padOuter: 24,               // ✅ 外侧安全边距（靠书边）
     padInner: 44,               // ✅ 内侧安全边距（靠书脊/中线）
     justify: "space-between",   // ✅ 行内尽量均分
@@ -95,16 +120,25 @@
       cardW = Math.floor(w1 / 5) * 5;
       if (cardW < 50) cardW = 50;
       const cardH = (cardW * 7) / 5;
-  
+
+      // ✅ 固定“文字占位”：标题两行 + 时间一行（开关只做显隐，不触发布局重排）
+      const metaLineH = clamp(roundToEvenPx(cardW * 0.16), 12, 16);
+      const metaGap = 8;
+      const metaH = metaLineH * 3 + 16; // 3 行 + 内边距/边框余量
+      const cardTotalH = cardH + metaGap + metaH;
+
       // 行数：row-gap 用同一个 gap，保持纵向统一
-      let rows = Math.floor((pageH + gap) / (cardH + gap));
+      let rows = Math.floor((pageH + gap) / (cardTotalH + gap));
       rows = clamp(rows, 1, pageW < 380 ? 3 : 4);
-  
+
       return {
         cols,
         rows,
         cardW,
         cardH,
+        metaLineH,
+        metaGap,
+        metaH,
         gap,
         padOuter,
         padInner,
@@ -121,11 +155,18 @@
     cardW = Math.max(cardW, 50);
     const cardH = (cardW * 7) / 5;
     gap = clamp(roundToEvenPx(cardW * GAP_RATIO), GAP_MIN, GAP_MAX);
-  
-    let rows = Math.floor((pageH + gap) / (cardH + gap));
+
+    // ✅ 固定“文字占位”：标题两行 + 时间一行（开关只做显隐，不触发布局重排）
+    const metaLineH = clamp(roundToEvenPx(cardW * 0.16), 12, 16);
+    const metaGap = 8;
+    const metaH = metaLineH * 3 + 16; // 3 行 + 内边距/边框余量
+    const cardTotalH = cardH + metaGap + metaH;
+
+    let rows = Math.floor((pageH + gap) / (cardTotalH + gap));
     rows = clamp(rows, 1, pageW < 380 ? 3 : 4);
-  
-    return { cols: 1, rows, cardW, cardH, gap, padOuter, padInner, justify: "center" };
+
+    return { cols: 1, rows, cardW, cardH, metaLineH, metaGap, metaH, gap, padOuter, padInner, justify: "center" };
+
   }
   
   let ro;
@@ -146,12 +187,14 @@
   onMounted(() => {
     refreshLayout();
     ro = new ResizeObserver(() => refreshLayout());
+    document.addEventListener("pointerdown", onDocPointerDown);
     if (pageMeasureEl.value) ro.observe(pageMeasureEl.value);
     window.addEventListener("resize", refreshLayout, { passive: true });
   });
   
   onBeforeUnmount(() => {
     ro?.disconnect?.();
+    document.removeEventListener("pointerdown", onDocPointerDown);
     window.removeEventListener("resize", refreshLayout);
   });
   
@@ -160,6 +203,9 @@
     "--card-w": `${layout.value.cardW}px`,
     "--card-h": `${layout.value.cardH}px`,
     "--gap": `${layout.value.gap}px`,
+    "--meta-line-h": `${layout.value.metaLineH}px`,
+    "--meta-gap": `${layout.value.metaGap}px`,
+    "--meta-h": `${layout.value.metaH}px`,
   }));
   
   // ✅ 左/右页：外侧/内侧 padding 不同（中线当“页面边框”处理）
@@ -321,9 +367,26 @@
             <h1 class="text-2xl md:text-3xl font-bold tracking-tight">Stamp Album</h1>
             <p class="text-sm opacity-80 mt-1">点卡看详情 · 空白处双击翻页</p>
           </div>
-          <div class="text-xs opacity-70">
-            自动排版：{{ layout.cols }}×{{ layout.rows }} / 单页 {{ stampsPerPage }}
-          </div>
+          <div class="flex items-center gap-3">
+  <div class="text-xs opacity-70 whitespace-nowrap">
+    自动排版：{{ layout.cols }}×{{ layout.rows }} / 单页 {{ stampsPerPage }}
+  </div>
+
+  <div ref="settingsEl" class="relative">
+    <button class="tool-icon-btn" @click.stop="toggleSettings" title="设置" aria-label="Settings">⚙️</button>
+
+    <div v-if="settingsOpen" class="tool-menu" @click.stop>
+      <div class="tool-menu-title">设置</div>
+
+      <label class="tool-row">
+        <span class="tool-row-icon">🕒</span>
+        <span class="tool-row-text">显示获得时间</span>
+        <input class="tool-toggle" type="checkbox" v-model="showAcquiredDate" />
+      </label>
+    </div>
+  </div>
+</div>
+
         </div>
   
         <div class="book-shell relative mx-auto">
@@ -332,11 +395,13 @@
               <div class="absolute inset-0 page-texture pointer-events-none z-0"></div>
   
               <div class="absolute inset-0 grid grid-cols-2 z-10">
-                <div ref="pageMeasureEl" class="p-4 md:p-6">
-                  <StampGrid :items="underLeft" :gridStyle="leftGridStyle" @select="safeOpenStamp" />
+                <div class="p-4 md:p-6">
+                  <div ref="pageMeasureEl" class="h-full w-full">
+                    <StampGrid :items="underLeft" :gridStyle="leftGridStyle" :showAcquiredDate="showAcquiredDate" @select="safeOpenStamp" />
+                  </div>
                 </div>
                 <div class="p-4 md:p-6">
-                  <StampGrid :items="underRight" :gridStyle="rightGridStyle" @select="safeOpenStamp" />
+                  <StampGrid :items="underRight" :gridStyle="rightGridStyle":showAcquiredDate="showAcquiredDate" @select="safeOpenStamp" />
                 </div>
               </div>
   
@@ -347,10 +412,10 @@
   
               <div v-if="!isFlipping" class="absolute inset-0 grid grid-cols-2 z-20">
                 <div class="p-4 md:p-6" @click="onPageBlankClick('left', $event)">
-                  <StampGrid :items="current.left" :gridStyle="leftGridStyle" @select="safeOpenStamp" />
+                  <StampGrid :items="current.left" :gridStyle="leftGridStyle":showAcquiredDate="showAcquiredDate" @select="safeOpenStamp" />
                 </div>
                 <div class="p-4 md:p-6" @click="onPageBlankClick('right', $event)">
-                  <StampGrid :items="current.right" :gridStyle="rightGridStyle" @select="safeOpenStamp" />
+                  <StampGrid :items="current.right" :gridStyle="rightGridStyle":showAcquiredDate="showAcquiredDate" @select="safeOpenStamp" />
                 </div>
               </div>
   
@@ -358,12 +423,12 @@
                 <div class="sheet" :class="direction" @animationend="onFlipEnd">
                   <div class="face front">
                     <div class="p-4 md:p-6 h-full">
-                      <StampGrid :items="sheetFront" :gridStyle="sheetGridStyle" />
+                      <StampGrid :items="sheetFront":showAcquiredDate="showAcquiredDate" :gridStyle="sheetGridStyle" />
                     </div>
                   </div>
                   <div class="face back">
                     <div class="p-4 md:p-6 h-full">
-                      <StampGrid :items="sheetBack" :gridStyle="sheetGridStyle" />
+                      <StampGrid :items="sheetBack":showAcquiredDate="showAcquiredDate" :gridStyle="sheetGridStyle" />
                     </div>
                   </div>
                   <div class="shadow"></div>
@@ -402,9 +467,9 @@
                   <p class="text-sm opacity-80 mb-3">
                     <span v-if="selectedStamp.isCollected">已收录</span>
                     <span v-else>未解锁</span>
-                    <span v-if="selectedStamp.collectedAt"> · {{ selectedStamp.collectedAt }}</span>
+                    <span v-if="selectedStamp.acquiredDate"> · {{ formatDateYMD(selectedStamp.acquiredDate) }}</span>
                   </p>
-                  <div class="modal-desc" v-if="selectedStamp.description" v-html="selectedStamp.description"></div>
+                  <div class="modal-desc" v-if="selectedStamp.desc" v-html="selectedStamp.desc"></div>
                   <p class="text-sm opacity-70" v-else>暂无描述。</p>
                 </div>
               </div>
@@ -517,6 +582,70 @@
     color: rgba(46, 49, 62, 0.92);
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.10);
     user-select: none;
+  }
+  .tool-icon-btn{
+    width: 38px;
+    height: 38px;
+    border-radius: 9999px;
+    background: rgba(255,255,255,0.16);
+    border: 1px solid rgba(255,255,255,0.22);
+    display: grid;
+    place-items: center;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.18);
+    cursor: pointer;
+    user-select: none;
+    transition: transform 120ms ease, background 120ms ease;
+  }
+  .tool-icon-btn:hover{
+    transform: translateY(-1px);
+    background: rgba(255,255,255,0.22);
+  }
+
+  .tool-menu{
+    position: absolute;
+    right: 0;
+    top: calc(100% + 10px);
+    width: 220px;
+    background: rgba(255,255,255,0.92);
+    border: 1px solid rgba(0,0,0,0.12);
+    border-radius: 14px;
+    box-shadow: 0 22px 70px rgba(0,0,0,0.22);
+    color: rgba(46,49,62,0.95);
+    padding: 10px;
+    z-index: 120;
+    backdrop-filter: blur(10px);
+  }
+  .tool-menu-title{
+    font-size: 12px;
+    font-weight: 800;
+    opacity: 0.75;
+    margin-bottom: 8px;
+  }
+  .tool-row{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 8px;
+    border-radius: 12px;
+    cursor: pointer;
+  }
+  .tool-row:hover{
+    background: rgba(0,0,0,0.04);
+  }
+  .tool-row-icon{
+    width: 20px;
+    display: grid;
+    place-items: center;
+  }
+  .tool-row-text{
+    flex: 1;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .tool-toggle{
+    width: 42px;
+    height: 22px;
+    accent-color: #f59e0b;
   }
   
   /* 弹窗字体保持黑色（保持） */
